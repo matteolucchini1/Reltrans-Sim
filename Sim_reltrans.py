@@ -59,18 +59,12 @@ else:
             sim_pars_max[i] = input()
             sim_pars[i] = random.uniform(sim_pars_min[i],sim_pars_max[i])
 
-save_file ="Parameters/spec_pars.dat"
-save_file = open(save_file, "w") 
-for i in range(len(sim_pars)):
-    save_file.write(str(sim_pars[i])+"\n")
-save_file.close()
-
 #sort out parameters for the simulation of flux energy spectrum:
 spec_pars = np.zeros(len(sim_pars)-2)
 for i in range(len(spec_pars)):
     if (i < 16):
         spec_pars[i] = sim_pars[i]
-    elif (i == 19 or i == 22 or i == 23):
+    elif (i == 18 or i == 22 or i == 23):
         spec_pars[i] = 1.
     else:
         spec_pars[i] == sim_pars[len(sim_pars)-1]
@@ -78,21 +72,47 @@ for i in range(len(spec_pars)):
 print("Input source flux between 0.5 and 10 keV, in erg/cm^2/s:")
 flux_source = input()
 
+save_file ="Parameters/spec_pars.dat"
+save_file = open(save_file, "w") 
+for i in range(len(spec_pars)):
+    save_file.write(str(spec_pars[i])+"\n")
+save_file.close()
+
+#clear flies in the Products folder:
+print("------------------------------------------------------------------------------------------")
+print("Type y if you want to remove the previous files - not that this is necessary if you are going")
+print("to use the same file names:")
+print("------------------------------------------------------------------------------------------")
+test = input()
+if(test == "y"):
+    os.system("rm Products/*")
+    os.system("rm Raw/*")
+
 print("------------------------------------------------------------------------------------------")
 print("Simulating flux energy spectrum:")
 print("------------------------------------------------------------------------------------------")
+#xspec settings since pyxspec seems to bypass the xpsec.rc fileName
+Xset.abund = "wilm"
+Xset.cosmo = "70 0 0.73"
+Xset.xsect = "vern"
+
 AllModels.lmod("reltrans",dirPath="~/Software/Reltrans")
-AllModels.setEnergies("0.5 10.0 250 log")
+#AllModels.setEnergies("0.5 10.0 250 log")
 sim_model = Model("rtransDbl",setPars=spec_pars.tolist())
 AllModels.calcFlux("0.5 10.0")
 flux_model = AllModels(1).flux
 renorm = float(flux_source)/float(flux_model[0])
+save_file = "Parameters/renorm.dat"
+save_file = open(save_file, "w") 
+save_file.write(str(renorm))
+save_file.close()
 sim_model.rtransDbl.norm = renorm
 AllModels.calcFlux("0.5 10.0")
 sim_settings = FakeitSettings(response='~/Data/Response/nicer-rmf6s-teamonly-array50.rmf',arf='~/Data/Response/nicer-consim135p-teamonly-array50.arf',
                               exposure=sim_pars[len(sim_pars)-3],fileName='Products/TimeAveraged_sim.pha')
 AllData.fakeit(1,sim_settings,applyStats=True,filePrefix="")
 AllData.clear()
+AllModels.clear()
 
 print("------------------------------------------------------------------------------------------")
 print("Flux energy spectrum done; lag energy spectra left")
@@ -138,14 +158,16 @@ for j in range(int(lagen_number)):
     files_name = files.replace(".dat","")
     save_file ="Parameters/lag_pars_"+files
     save_file = open(save_file, "w") 
-    for i in range(len(sim_pars)):
-        save_file.write(str(sim_pars[i])+"\n")
+    for i in range(len(lag_pars)):
+        save_file.write(str(lag_pars[i])+"\n")
     save_file.close()
     flx_call = "flx2xsp " + files + " " + files_name + ".pha " + files_name + ".rsp"
     os.system(flx_call)
+    AllData.clear()
+    AllModels.clear()
     os.system("mv *.dat Raw/")
     os.system("mv *.pha Products/")
     os.system("mv *.rsp Products/")
-    AllData.clear()
-    
+#for some reason I don't understand sometimes this needs to be called twice....   
+#os.system("mv *.dat Raw/")
 #TBD: figure out different model flavours
