@@ -10,6 +10,7 @@ from xspec import *
 from matplotlib import cm
 from matplotlib.colors import LogNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from rebin_spec import *
 
 from matplotlib.patches import Polygon
 import matplotlib.ticker as plticker
@@ -20,7 +21,7 @@ plt.rcParams.update({'font.size': 18})
 
 #Initialize convenient things:
 parameters_dbl = ['h1','h2','a','inc','rin','rout','zcos','Gamma','logxi','Afe','lognep','kTe','lumratio','nH','boost','Mass',
-                  'floHz','fhiHz','gammac','DelA','DelAB','g','Texp','pow','RESP']
+                  'floHz','fhiHz','gammac','DelA','DelAB','g','Texp','pow','RESP','Tin']
 
 lagonly_dbl = [16,17,18,19,20,21,23]
                   
@@ -60,36 +61,56 @@ else:
             sim_pars[i] = random.uniform(sim_pars_min[i],sim_pars_max[i])
 
 #sort out parameters for the simulation of flux energy spectrum:
-spec_pars = np.zeros(len(sim_pars)-2)
-for i in range(len(spec_pars)):
-    if (i < 16):
-        spec_pars[i] = sim_pars[i]
-    elif (i == 18 or i == 22 or i == 23):
-        spec_pars[i] = 1.
-    else:
-        spec_pars[i] == sim_pars[len(sim_pars)-1]
-    
-print("Input source flux between 0.5 and 10 keV, in erg/cm^2/s:")
-flux_source = input()
+#we need one array dedicated to reltrans (to calculate its normalisation) and a full one to pass to the actual simulation
+model_pars = np.zeros(len(sim_pars)+1)
+rtrans_pars = np.zeros(len(sim_pars)-2)
 
-save_file ="Parameters/spec_pars.dat"
+for i in range(len(model_pars)):
+    if (i < 16): #up to the BH mass, the input parameters are identical to those of rtransDbl 
+        model_pars[i] = sim_pars[i]
+    elif i in range(16,18):  #set fmin, fmax to 0
+        model_pars[i] = 0. 
+    elif i in range(19,22):
+        model_pars[i] = 0. #set phiA, phiAB, g to 0
+    elif (i==24):
+        model_pars[i] = sim_pars[13]  #When adding tbabs*diskbb, make nH identical 
+    elif (i==25):
+        model_pars[i] = sim_pars[len(sim_pars)-1] #set the disk temperature
+    else:
+        model_pars[i] = 1. #set everything else to 1, which sets the model to run the flux-energy spectrum
+for i in range(len(rtrans_pars)):
+    rtrans_pars[i] = model_pars[i]
+
+print("Input coronal flux between 0.5 and 10 keV, in erg/cm^2/s:")
+flux_corona = input()
+
+print("Input disk flux between 0.5 and 10 keV, in erg/cm^2/s:")
+flux_disk = input()
+
+save_file ="Parameters/model_pars.dat"
 save_file = open(save_file, "w") 
-for i in range(len(spec_pars)):
-    save_file.write(str(spec_pars[i])+"\n")
+for i in range(len(model_pars)):
+    save_file.write(str(model_pars[i])+"\n")
 save_file.close()
 
 #clear flies in the Products folder:
 print("------------------------------------------------------------------------------------------")
-print("Type y if you want to remove the previous files - not that this is necessary if you are going")
-print("to use the same file names:")
+print("Type y if you want to remove the previous files - not that this is necessary if you are")
+print("going to use the same file names:")
 print("------------------------------------------------------------------------------------------")
 test = input()
 if(test == "y"):
     os.system("rm Products/*")
     os.system("rm Raw/*")
 
+
 print("------------------------------------------------------------------------------------------")
 print("Simulating flux energy spectrum:")
+print("Output file prefix:")
+spectrum_name = input()
+spectrum_file = "Products/" + spectrum_name + ".pha"
+oversample_file = "Products/" + spectrum_name + "_sampled.pha"
+rebin_file = "Products/" + spectrum_name + "_rebin.pha"
 print("------------------------------------------------------------------------------------------")
 #xspec settings since pyxspec seems to bypass the xpsec.rc fileName
 Xset.abund = "wilm"
@@ -97,22 +118,48 @@ Xset.cosmo = "70 0 0.73"
 Xset.xsect = "vern"
 
 AllModels.lmod("reltrans",dirPath="~/Software/Reltrans")
-#AllModels.setEnergies("0.5 10.0 250 log")
-sim_model = Model("rtransDbl",setPars=spec_pars.tolist())
+
+corona_model = Model("rtransDbl",setPars=rtrans_pars.tolist())
 AllModels.calcFlux("0.5 10.0")
 flux_model = AllModels(1).flux
-renorm = float(flux_source)/float(flux_model[0])
+renorm_corona = float(flux_corona)/float(flux_model[0])
+print(renorm_corona)
+AllModels.clear()
+
+disk_model = Model("diskbb",setPars=[model_pars[25],model_pars[26]])
+AllModels.calcFlux("0.5 10.0")
+flux_model = AllModels(1).flux
+renorm_disk = float(flux_disk)/float(flux_model[0])
+print(renorm_disk)
+AllModels.clear()
+
+#TBD: add the calibration features from Jingyi's paper? Unsure if necessary
 save_file = "Parameters/renorm.dat"
 save_file = open(save_file, "w") 
-save_file.write(str(renorm))
+save_file.write(str(renorm_corona)+"\n")
+save_file.write(str(renorm_disk)+"\n")
 save_file.close()
-sim_model.rtransDbl.norm = renorm
+
+sim_model = Model("rtransDbl+TBabs*diskbb",setPars=model_pars.tolist())  
+sim_model.rtransDbl.norm = renorm_corona
+sim_model.diskbb.norm = renorm_disk 
 AllModels.calcFlux("0.5 10.0")
+AllModels.show()
 sim_settings = FakeitSettings(response='~/Data/Response/nicer-rmf6s-teamonly-array50.rmf',arf='~/Data/Response/nicer-consim135p-teamonly-array50.arf',
-                              exposure=sim_pars[len(sim_pars)-3],fileName='Products/TimeAveraged_sim.pha')
+                              exposure=sim_pars[22],fileName=spectrum_file)
 AllData.fakeit(1,sim_settings,applyStats=True,filePrefix="")
 AllData.clear()
 AllModels.clear()
+print("------------------------------------------------------------------------------------------")
+print("Calling grppha to over-sample the instrument resolution;")
+print("Type the following in the grppha command line: ")
+print("reset quality & bad 0-29 1200-1500 &  systematics 0-299 0.02 & group nicer_channels_to_group.txt & exit")
+print("------------------------------------------------------------------------------------------")
+resolution_oversample_string = "grppha " + spectrum_file + " " + oversample_file
+print(resolution_oversample_string)
+os.system(resolution_oversample_string)
+jsgroup(oversample_file,20.,rebin_file)
+print("Final product: " + rebin_file)
 
 print("------------------------------------------------------------------------------------------")
 print("Flux energy spectrum done; lag energy spectra left")
@@ -123,17 +170,19 @@ for j in range(int(lagen_number)):
     if(sim_mode == "value"):
         print("Input simulation parameters for lag energy spectrum:",j+1) 
         lag_pars = np.zeros(len(parameters_dbl))
-        for i in range(len(parameters_dbl)):
+        for i in range(len(parameters_dbl)-1):
             if (i in lagonly_dbl):
                 print("Input parameter ",i+1,", ",parameters_dbl[i])
                 lag_pars[i] = input()
+                if(i==16 or i ==17):
+                    print("At this frequency, phase wrapping is:",1./(2.*lag_pars[i])," s")
             else:
                 lag_pars[i] = sim_pars[i] 
     else:
-        print("Input simulation parameter range for every spectrum:")  
-        lag_pars_min = np.zeros(len(parameters_dbl))
-        lag_pars_max = np.zeros(len(parameters_dbl))
-        lag_pars = np.zeros(len(parameters_dbl))    
+        print("Input simulation parameter range for lag energy spectrum:")  
+        lag_pars_min = np.zeros(len(parameters_dbl)-1)
+        lag_pars_max = np.zeros(len(parameters_dbl)-1)
+        lag_pars = np.zeros(len(parameters_dbl)-1)    
         for i in range(len(parameters_dbl)):
             if (i in lagonly_dbl):
                 print("Input parameter ",i+1,", ",parameters_dbl[i], " min and max values")
@@ -142,14 +191,14 @@ for j in range(int(lagen_number)):
                 lag_pars[i] = random.uniform(lag_pars_min[i],lag_pars_max[i]) 
             else:
                 lag_pars[i] = sim_pars[i] 
-    #tbd: save lag parameters 
+    lag_pars[len(lag_pars)-1] = 1.
     print("------------------------------------------------------------------------------------------")
     print("Simulating lag energy spectra:")
     print("------------------------------------------------------------------------------------------")
     print("Note: because Xspec is weird the simulation will be run first with default paramters, then")
     print("with the correct input parameters. Input the same output file name twice to fix this!")
     print("------------------------------------------------------------------------------------------")
-    AllModels.setEnergies("0.5 10.0 50 log")
+    AllModels.setEnergies("0.5 10.0 25 log")
     sim_model = Model("simrtdbl",setPars=lag_pars.tolist())  
     files = str(glob.glob('x*.dat'))
     files = files.replace("'","")
@@ -171,3 +220,5 @@ for j in range(int(lagen_number)):
 #for some reason I don't understand sometimes this needs to be called twice....   
 #os.system("mv *.dat Raw/")
 #TBD: figure out different model flavours
+
+print("Simulation completed, full output in Products/")

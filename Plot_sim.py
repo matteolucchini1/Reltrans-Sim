@@ -26,16 +26,18 @@ Xset.xsect = "vern"
 colors = ['#ff5a00','#ff9c00','#ffde00','#ffeea4','#e6cd6a','#c5a46a','#7b6220','#18394a','#39627b','#62839c','#acacac']
 fsize = 26
 
-#parname = ("spec_pars.dat")
+#parname = ("model_pars.dat")
 parname = ("lag_pars_xLowF.dat")
 filename = ("xLowF")
-renorm = ("Parameters/renorm.dat")
-renorm = np.genfromtxt(renorm)
+#renorm = ("Parameters/renorm.dat")
+#renorm = np.genfromtxt(renorm)
 
 #this scripts plots the model + simulated data for the given input file. Note that you have to specify the filenames manually
 #and tweak a few things for the plot because I'm feeling lazy
 pars_sim = np.genfromtxt("Parameters/"+parname)
-pars_model = np.zeros(23)
+pars_model = np.zeros(24)
+#pars_model = np.zeros(26) 
+#note: the lenght of this array depends on whether we're doing the time-averaged or lag energy spectrum
 
 for i in range(len(pars_model)):
     if (i==18 or i == 22):
@@ -44,6 +46,8 @@ for i in range(len(pars_model)):
     else: 
         pars_model[i] = pars_sim[i]
 #remember to tweak this to the same value as the simulation script 
+
+print(pars_model)       
        
 #load the flux-energy spectrum:
 flux_energy = Spectrum("Products/"+filename+".pha")
@@ -51,14 +55,21 @@ flux_energy.ignore("**-0.5")
 flux_energy.ignore("10.0-**")
 
 AllModels.lmod("reltrans",dirPath="~/Software/Reltrans")
+#test_model = Model("rtransDbl+TBabs*diskbb",setPars=pars_model.tolist())  
 test_model = Model("rtransDbl",setPars=pars_model.tolist())  
-#test_model.rtransDbl.norm = renorm
+test_model.rtransDbl.norm = 1.
+#test_model.rtransDbl.norm = renorm[0]
+#test_model.TBabs.nH = pars_model[13]
+#test_model.diskbb.norm = renorm[1]
+
+
+AllModels.show()
 
 Plot.device = "/xs"
 Plot.xAxis = "keV"
 Plot.xLog = True
 #Plot("eeufspec")
-Plot("ufspec")
+Plot("data")
 xVals = Plot.x()
 yVals = Plot.y()
 xErrs = Plot.xErr()
